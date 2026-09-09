@@ -66,3 +66,10 @@ Race Developmentは出馬表列だけをSimulator入力に使用する。
 - 地雷ラップ判定〇
 - 前日坂路時計 <= 66.99秒
 を該当馬ごとに表示。
+
+
+## v6.6 CLOUD FIX
+- Main navigation changed from tabs to lazy sidebar pages.
+- Race card browser upload removed; `data/調教判定表.csv` is the only current-race source.
+- Google Drive page can open without loading prediction models.
+- Streamlit deployment model environment pinned; deploy with Python 3.13.
