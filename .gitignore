@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
+output/*
+!output/README.txt
+backups/*
+!backups/README.txt
+input/*
+!input/README.txt
+data/history_master.csv.gz
+data/update_log_tmp.csv

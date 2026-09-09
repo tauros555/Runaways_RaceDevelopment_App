@@ -1,0 +1,14 @@
+区分,ファイル,必須,用途,更新頻度
+履歴,data/history_seed_2020_2026.csv.gz,YES,初期履歴308060走・馬/騎手過去履歴生成,初期同梱
+履歴,data/history_master.csv.gz,RUNTIME,TARGET年度CSV差分更新後の本番履歴,毎週自動更新
+コース,data/course_structure.csv,YES,コース構造・FirstTurnPressure・ClosingOpportunity等,固定/研究更新時
+馬特性,data/horse_startdash_tracking.csv,YES,StartDash/EarlyTracking,研究更新時
+展開,data/scenario_thresholds.csv,YES,展開評価◎○△×のPast-Only閾値,年次/再学習時
+展開,data/scenario_queue_transform.csv,YES,シナリオ別隊列変換参照,再学習時
+参考,data/pair_reference.csv,YES,近い位置の馬同士の共存しやすさ参考表示,検証更新時
+モデル,models/formal_queue_models.joblib,YES,Lead/初角/3角/4角正式モデル,再学習時
+モデル,models/formal_fullwin_distill.joblib,YES,FullWinProb蒸留モデル,再学習時
+モデル,models/scenario5_formal.joblib,YES,5分類シナリオモデル,再学習時
+画面,assets/race_development_header.jpeg,YES,Race Developmentヘッダー,固定
+入力,input/Runaway判定表,USER,今回出馬表データ,開催ごと
+入力,input/TARGET年度馬単位CSV,USER,履歴差分更新,毎週

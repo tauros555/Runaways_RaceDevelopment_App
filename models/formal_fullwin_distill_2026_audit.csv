@@ -1,0 +1,3 @@
+Target,N,Metric,Value
+FullWinProb_distill,701,MAE_vs_validated_OOF,0.028516355374292424
+FullWinProb_distill,701,Spearman_vs_validated_OOF,0.852244427588086
