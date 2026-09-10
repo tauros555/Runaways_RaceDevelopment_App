@@ -8,9 +8,10 @@ from modules.feature_engine import build_features
 from modules.simulator_engine import predict, assign_grade
 from modules.pair_reference import note
 from modules.scenario_engine import predict_scenario, scenario_adjustment
-from modules.queue_visual import render_flow
+from modules.route_bias import resolve_auto_bias, assign_route_positions, render_route_grid
+from modules.early_speed_view import render_ten_battle
 from modules.monte_carlo import simulate_race
-from modules.movement_visual import add_movement_columns, render_movement_table, render_movement_flow
+from modules.movement_visual import add_movement_columns, render_movement_table
 from modules.racecard_local import load_training_judgment_racecard, available_races, select_race
 from modules.attention_flags import add_attention_flags, attention_summary
 
@@ -42,364 +43,281 @@ def racecard_master():
     return load_training_judgment_racecard(config.RACECARD_FILE)
 
 def course_row(place, surface, distance):
-    c = course()
-    surf = "芝" if surface == "芝" else "ダート"
-    z = c[
-        (c["場所"].astype(str) == str(place))
-        & (c["芝・ダート"].astype(str) == surf)
-        & (pd.to_numeric(c["距離"], errors="coerce") == float(distance))
+    c=course()
+    surf="芝" if surface=="芝" else "ダート"
+    z=c[
+        (c["場所"].astype(str)==str(place))
+        &(c["芝・ダート"].astype(str)==surf)
+        &(pd.to_numeric(c["距離"],errors="coerce")==float(distance))
     ]
     return z.iloc[0].to_dict() if len(z) else {}
 
-gdrive = GoogleDriveOAuthStorage(st.secrets, st.session_state)
+gdrive=GoogleDriveOAuthStorage(st.secrets,st.session_state)
 
-def handle_gdrive_oauth_callback():
+def handle_oauth_callback():
     try:
-        code = st.query_params.get("code")
-        if isinstance(code, list):
-            code = code[0] if code else None
-        if code and not st.session_state.get("_gdrive_oauth_code_done"):
+        code=st.query_params.get("code")
+        if isinstance(code,list):
+            code=code[0] if code else None
+        if code and not st.session_state.get("_oauth_done"):
             gdrive.exchange_code(code)
-            st.session_state["_gdrive_oauth_code_done"] = True
-            st.session_state["_gdrive_msg"] = "Google Drive認証が完了しました。"
-            try:
-                st.query_params.clear()
-            except Exception:
-                pass
+            st.session_state["_oauth_done"]=True
+            st.session_state["_gdrive_msg"]="Google Drive認証が完了しました。"
+            try: st.query_params.clear()
+            except Exception: pass
     except Exception as e:
-        st.session_state["_gdrive_msg"] = f"OAuth認証処理失敗: {e}"
+        st.session_state["_gdrive_msg"]=f"OAuth認証処理失敗: {e}"
 
-def sync_history_from_drive_once():
-    if st.session_state.get("_gdrive_synced"):
-        return
-    ds = gdrive.status()
-    if not ds.connected:
-        return
-    try:
-        if gdrive.download_latest_history(config.HISTORY_FILE):
-            history.clear()
-            st.session_state["_gdrive_msg"] = "Google Driveから最新履歴を取得しました。"
-        else:
-            st.session_state["_gdrive_msg"] = "Driveに履歴がないため同梱seedを使用します。"
-        st.session_state["_gdrive_synced"] = True
-    except Exception as e:
-        st.session_state["_gdrive_msg"] = f"Drive履歴取得失敗: {e}"
+handle_oauth_callback()
 
-handle_gdrive_oauth_callback()
-sync_history_from_drive_once()
+st.image(config.HEADER_IMAGE,use_container_width=True)
 
-# Header
-st.image(config.HEADER_IMAGE, use_container_width=True)
-
-# Navigation - IMPORTANT: unlike st.tabs, only the selected page executes.
-page = st.sidebar.radio(
+page=st.sidebar.radio(
     "Race Development",
-    ["🎯 レース予測", "🔄 TARGET年度更新", "☁ Google Drive", "🧱 マスタ状態"],
+    ["🎯 レース予測","☁ Google Drive","🧱 データ状態"],
     index=0,
 )
+st.sidebar.caption("v6.8 ROUTE BIAS")
+st.sidebar.caption("出馬表：data/調教判定表.csv")
 
-st.sidebar.caption("v6.6 CLOUD FIX")
-st.sidebar.caption("出馬表: data/調教判定表.csv")
-
-# --------------------
-# Google Drive page
-# --------------------
-if page == "☁ Google Drive":
-    st.header("Google Drive OAuth")
-    ds = gdrive.status()
-
+if page=="☁ Google Drive":
+    st.header("Google Drive")
+    ds=gdrive.status()
     if ds.connected:
         st.success("Google Drive OAuth接続済み")
         st.caption(f"folder_id: {ds.folder_id}")
-
-        c1, c2 = st.columns(2)
-        if c1.button("Driveから最新履歴を再取得", type="primary"):
+        if st.button("Driveから最新履歴を取得",type="primary"):
             try:
                 if gdrive.download_latest_history(config.HISTORY_FILE):
                     history.clear()
                     st.success("最新履歴を取得しました。")
                 else:
-                    st.info("Driveにhistory_master.csv.gzがまだありません。")
+                    st.info("Driveにhistory_master.csv.gzがありません。")
             except Exception as e:
                 st.error(f"取得失敗: {e}")
-
-        if c2.button("Drive接続を解除"):
+        if st.button("接続解除"):
             gdrive.disconnect()
-            st.session_state.pop("_gdrive_synced", None)
             st.rerun()
-
     elif gdrive.enabled and gdrive.configured():
         st.info("Google Driveへの接続が必要です。")
-        st.link_button("Google Driveに接続", gdrive.authorization_url(), type="primary")
-        st.caption("Googleの認証画面で、ご自身のGoogleアカウントを選択してください。")
-
+        st.link_button("Google Driveに接続",gdrive.authorization_url(),type="primary")
     elif gdrive.enabled:
-        st.warning("OAuth設定が未完了です。Streamlit CloudのSecretsを設定してください。")
-        st.code(
-            """[gdrive_oauth]
-enabled = true
-client_id = "..."
-client_secret = "..."
-redirect_uri = "https://あなたのアプリ.streamlit.app"
-folder_id = "..."
-history_filename = "history_master.csv.gz"
-backup_folder_name = "backup"
-log_filename = "update_log.csv" """,
-            language="toml",
-        )
+        st.warning("OAuth設定が未完了です。Streamlit Secretsを設定してください。")
     else:
-        st.info("Google Drive連携は現在OFFです。")
-        st.write("Streamlit Cloud → App settings → Secrets に gdrive_oauth 設定を入れると接続ボタンが有効になります。")
-
+        st.info("Google Drive連携OFF。")
     if st.session_state.get("_gdrive_msg"):
         st.caption(st.session_state["_gdrive_msg"])
     st.stop()
 
-# --------------------
-# Master status page
-# --------------------
-if page == "🧱 マスタ状態":
-    st.header("マスタ状態")
-
-    h = history()
-    c1, c2, c3 = st.columns(3)
-    c1.metric("履歴行数", f"{len(h):,}")
-
-    if len(h):
-        d = pd.to_numeric(h["date"], errors="coerce").dropna()
-        if len(d):
-            c2.metric("開始", str(int(d.min())))
-            c3.metric("最新", str(int(d.max())))
-
+if page=="🧱 データ状態":
+    st.header("データ状態")
     try:
-        rc = racecard_master()
-        st.success(f"data/調教判定表.csv 読込OK：{len(rc):,}行")
-        races = available_races(rc)
-        st.write(f"登録レース数: {len(races):,}")
-        st.dataframe(races.head(30), use_container_width=True, hide_index=True)
+        rc=racecard_master()
+        races=available_races(rc)
+        invalid=(~rc["_date_valid"]).sum() if "_date_valid" in rc.columns else 0
+        c1,c2,c3=st.columns(3)
+        c1.metric("調教判定表 行数",f"{len(rc):,}")
+        c2.metric("有効レース",f"{len(races):,}")
+        c3.metric("除外した不正日付行",f"{int(invalid):,}")
+        st.dataframe(races.head(50),use_container_width=True,hide_index=True)
     except Exception as e:
-        st.error(f"調教判定表読込失敗: {e}")
+        st.error(e)
+    st.info("履歴マスタはこのページでは自動読込しません。重い処理はレース予測実行時だけ行います。")
     st.stop()
 
-# --------------------
-# TARGET update page
-# --------------------
-if page == "🔄 TARGET年度更新":
-    st.header("TARGET年度更新")
-    up = st.file_uploader("TARGET年度馬単位CSV", type=["csv"], key="annual")
-
-    if up:
-        raw = read_csv_auto(up)
-        st.info(f"{len(raw):,}行を読込")
-
-        if st.button("差分確認", type="primary"):
-            upd, a = upsert_annual(history(), raw)
-            st.session_state["upd"] = upd
-            st.session_state["audit"] = a
-
-        if "audit" in st.session_state:
-            a = st.session_state["audit"]
-            cols = st.columns(4)
-            for col, k in zip(cols, ["INSERT", "UPDATE", "SKIP", "更新後件数"]):
-                col.metric(k, f"{a[k]:,}")
-
-            if st.button("履歴マスタへ反映"):
-                ds = gdrive.status()
-
-                if ds.connected:
-                    try:
-                        gdrive.backup_current_history(config.HISTORY_FILE)
-                    except Exception as e:
-                        st.warning(f"Driveバックアップ失敗: {e}")
-
-                save_history(st.session_state["upd"], config.HISTORY_FILE)
-                history.clear()
-
-                if ds.connected:
-                    try:
-                        fid = gdrive.upload_latest_history(config.HISTORY_FILE)
-                        audit = dict(st.session_state.get("audit", {}))
-                        audit["timestamp"] = pd.Timestamp.now().isoformat()
-                        audit["history_file_id"] = fid
-                        gdrive.append_update_log(audit, "data/update_log_tmp.csv")
-                        st.success("更新完了。Google Driveへ最新履歴を保存しました。")
-                    except Exception as e:
-                        st.error(f"ローカル更新は完了しましたがDrive保存に失敗: {e}")
-                else:
-                    st.success("更新完了（ローカル保存）")
-    st.stop()
-
-# --------------------
 # Race prediction page
-# --------------------
 st.header("Race Development")
 
 try:
-    rc = racecard_master()
+    rc=racecard_master()
+    races=available_races(rc)
 except Exception as e:
-    st.error(f"data/調教判定表.csv を読み込めません: {e}")
+    st.error(f"data/調教判定表.csv 読込失敗: {e}")
     st.stop()
 
-races = available_races(rc)
 if races.empty:
-    st.warning("調教判定表にレースがありません。")
+    st.warning("有効なレース日付がありません。YYYYMMDDの8桁日付のみ利用します。")
     st.stop()
 
-# Three-step selector from the local data file, no browser upload.
-dates = sorted(pd.to_numeric(races["年月日"], errors="coerce").dropna().astype(int).unique(), reverse=True)
-sel_date = st.selectbox("日付", dates, index=0)
-r1 = races[pd.to_numeric(races["年月日"], errors="coerce") == sel_date]
+# Strict date selector
+date_rows=races[["年月日","日付表示"]].drop_duplicates().sort_values("年月日",ascending=False)
+date_map={r["日付表示"]:int(r["年月日"]) for _,r in date_rows.iterrows()}
+date_label=st.selectbox("日付",list(date_map.keys()))
+sel_date=date_map[date_label]
 
-places = sorted(r1["場所"].dropna().astype(str).unique())
-sel_place = st.selectbox("開催場", places)
-r2 = r1[r1["場所"].astype(str) == sel_place]
+r1=races[races["年月日"]==sel_date]
+places=sorted(r1["場所"].dropna().astype(str).unique())
+sel_place=st.selectbox("開催場",places)
 
-rs = sorted(pd.to_numeric(r2["R"], errors="coerce").dropna().astype(int).unique())
-sel_r = st.selectbox("R", rs)
+r2=r1[r1["場所"].astype(str)==sel_place]
+rs=sorted(pd.to_numeric(r2["R"],errors="coerce").dropna().astype(int).unique())
+sel_r=st.selectbox("R",rs)
 
-rr = r2[pd.to_numeric(r2["R"], errors="coerce") == sel_r].iloc[0]
-current = select_race(rc, rr["current_race_key"])
-current = add_attention_flags(current)
+rr=r2[pd.to_numeric(r2["R"],errors="coerce")==sel_r].iloc[0]
+current=select_race(rc,rr["current_race_key"])
+current=add_attention_flags(current)
 
-surface = str(current["芝・ダ"].iloc[0])
-dist = float(pd.to_numeric(current["距離"], errors="coerce").iloc[0])
-year = int(str(sel_date)[:4])
+surface=str(current["芝・ダ"].iloc[0])
+dist=float(pd.to_numeric(current["距離"],errors="coerce").iloc[0])
+year=int(str(sel_date)[:4])
+race_key=str(rr["current_race_key"])
 
 st.caption(
-    f"参照元: data/調教判定表.csv ｜ "
-    f"{sel_date} {sel_place} {sel_r}R {rr['レース名']} {surface}{int(dist)}m ｜ "
-    f"{len(current)}頭"
+    f"参照元：data/調教判定表.csv ｜ {date_label} {sel_place} {sel_r}R "
+    f"{rr['レース名']} {surface}{int(dist)}m ｜ {len(current)}頭"
 )
 
-# Attention badges from training judgment table.
-att = attention_summary(current)
+
+# 馬場状態はユーザー観察値。進路バイアスはAUTOまたは手動指定。
+st.subheader("馬場・進路バイアス")
+bc1,bc2=st.columns(2)
+going=bc1.selectbox("馬場状態",["未指定","良","稍重","重","不良"],index=0)
+bias_mode=bc2.selectbox(
+    "進路有利想定",
+    ["AUTO","内有利","やや内有利","フラット","やや外有利","外有利"],
+    index=0,
+)
+cr=course_row(sel_place,surface,dist)
+auto_bias,auto_reason=resolve_auto_bias(cr)
+effective_bias=auto_bias if bias_mode=="AUTO" else bias_mode
+st.info(f"適用バイアス：**{effective_bias}**　｜　馬場状態：{going}")
+if bias_mode=="AUTO":
+    st.caption(f"AUTO根拠：{auto_reason}")
+else:
+    st.caption("手動指定をAUTOより優先しています。馬場状態を見て当日の内外有利を変更できます。")
+
+# Reset prior prediction if selection changed
+if st.session_state.get("_active_race_key") not in (None,race_key):
+    for k in ["_pred_result","_scenario","_raceinfo","_active_scenario","_mc_result","_mc_meta"]:
+        st.session_state.pop(k,None)
+st.session_state["_active_race_key"]=race_key
+
+# Attention flags always visible without loading history/models
+att=attention_summary(current)
 if not att.empty:
     st.subheader("調教判定表 注目馬")
-    cols = st.columns(min(3, len(att)))
-    for i, (_, r) in enumerate(att.iterrows()):
-        with cols[i % len(cols)]:
+    cols=st.columns(min(3,max(1,len(att))))
+    for i,(_,r) in enumerate(att.iterrows()):
+        with cols[i%len(cols)]:
             st.info(f"{int(r['馬番'])} {r['馬名']}\n\n{r['注目フラグ']}")
 
-# Prediction model execution with a clear deployment-compatibility message.
-try:
-    feat = build_features(current, history(), course_row(sel_place, surface, dist))
-    pred, ri = predict(feat)
-except ModuleNotFoundError as e:
-    st.error("学習済みモデルの実行環境が一致していません。")
-    st.code(str(e))
-    st.warning(
-        "Streamlit Community Cloudを Python 3.13 で再デプロイしてください。"
-        "このモデル群はPython 3.13 + scikit-learn 1.8系で動作確認しています。"
-    )
-    st.stop()
-except Exception as e:
-    st.error("隊列モデルの実行中にエラーが発生しました。")
-    st.exception(e)
+st.divider()
+st.subheader("予測実行")
+st.caption("レース選択だけでは履歴マスタや学習済みモデルを読み込みません。下のボタンを押した時だけ計算します。")
+
+if st.button("▶ Race Development予測を実行",type="primary",use_container_width=True):
+    with st.spinner("履歴・モデルを読み込み、隊列とシナリオを計算しています..."):
+        feat=build_features(current,history(),course_row(sel_place,surface,dist))
+        pred,ri=predict(feat)
+        pred=assign_grade(pred,thresholds(),year,surface)
+        scen,pred=predict_scenario(pred,ri)
+        active=scen["PredictedScenario"]
+        pred=scenario_adjustment(pred,active)
+        pred=add_movement_columns(pred)
+        st.session_state["_pred_result"]=pred
+        st.session_state["_scenario"]=scen
+        st.session_state["_raceinfo"]=ri
+        st.session_state["_active_scenario"]=active
+        st.session_state.pop("_mc_result",None)
+        st.session_state.pop("_mc_meta",None)
+
+if "_pred_result" not in st.session_state:
     st.stop()
 
-pred = assign_grade(pred, thresholds(), year, surface)
-scen, pred = predict_scenario(pred, ri)
+pred=st.session_state["_pred_result"].copy()
+scen=st.session_state["_scenario"]
+ri=st.session_state["_raceinfo"]
 
-m = st.columns(4)
-m[0].metric("先行圧力", ri["先行圧力"])
-m[1].metric("LeadCompetition", f"{ri['LeadCompetitionIndex_v2']:.3f}")
-m[2].metric("逃げ密度", f"{ri['LeadDensity']:.3f}")
-m[3].metric("先行密度", f"{ri['FrontDensity']:.3f}")
+m=st.columns(4)
+m[0].metric("先行圧力",ri["先行圧力"])
+m[1].metric("LeadCompetition",f"{ri['LeadCompetitionIndex_v2']:.3f}")
+m[2].metric("逃げ密度",f"{ri['LeadDensity']:.3f}")
+m[3].metric("先行密度",f"{ri['FrontDensity']:.3f}")
+
+st.subheader("テン争い")
+st.markdown(render_ten_battle(pred),unsafe_allow_html=True)
 
 st.subheader("レースシナリオ")
-ss = st.columns(5)
-for col, label, key in zip(
+ss=st.columns(5)
+for col,label,key in zip(
     ss,
-    ["SLOW", "EVEN", "HIGH", "SPRINT", "LONG"],
-    ["P_SLOW", "P_EVEN", "P_HIGH", "P_SPRINT_FINISH", "P_LONG_SPURT"],
+    ["SLOW","EVEN","HIGH","SPRINT","LONG"],
+    ["P_SLOW","P_EVEN","P_HIGH","P_SPRINT_FINISH","P_LONG_SPURT"],
 ):
-    col.metric(label, f"{scen[key] * 100:.1f}%")
+    col.metric(label,f"{scen[key]*100:.1f}%")
+st.info(f"AUTO予測：{scen['PredictedScenario']} / confidence {scen['TopProbability']*100:.1f}%")
 
-st.info(f"AUTO予測: {scen['PredictedScenario']} / confidence {scen['TopProbability']*100:.1f}%")
-
-mode = st.selectbox(
-    "シナリオ",
-    ["AUTO", "SLOW", "EVEN", "HIGH", "SPRINT_FINISH", "LONG_SPURT"],
+mode=st.selectbox(
+    "表示シナリオ",
+    ["AUTO","SLOW","EVEN","HIGH","SPRINT_FINISH","LONG_SPURT"],
+    index=0,
 )
-active = scen["PredictedScenario"] if mode == "AUTO" else mode
-pred = scenario_adjustment(pred, active)
-pred = add_movement_columns(pred)
+active=scen["PredictedScenario"] if mode=="AUTO" else mode
+pred_view=scenario_adjustment(pred,active)
+pred_view=add_movement_columns(pred_view)
 
-st.subheader("馬群図")
-st.markdown(render_flow(pred, active, ri), unsafe_allow_html=True)
+# 内・中・外の進路推定と馬場バイアス補正
+pred_view=assign_route_positions(pred_view,cr,effective_bias)
 
-st.subheader("予測隊列")
-cols = [
-    z for z in [
+st.subheader("予想隊列")
+st.caption("画面表示は初角と最終コーナーの2場面。横＝前後位置、縦＝内・中・外です。")
+st.markdown(render_route_grid(pred_view,"初角",effective_bias),unsafe_allow_html=True)
+st.markdown(render_route_grid(pred_view,"最終",effective_bias),unsafe_allow_html=True)
+
+st.subheader("進路バイアス影響")
+route_cols=[c for c in [
+    "馬番","馬名","初角ゾーン","初角進路","最終角ゾーン","最終角進路",
+    "進路バイアス評価","進路バイアス補正","展開評価"
+] if c in pred_view.columns]
+route_show=pred_view[route_cols].sort_values("Pred4ScenarioRank" if "Pred4ScenarioRank" in pred_view.columns else "馬番").copy()
+if "進路バイアス補正" in route_show.columns:
+    route_show["進路バイアス補正"]=(route_show["進路バイアス補正"]*100).round(1).astype(str)+"pt"
+st.dataframe(route_show,use_container_width=True,hide_index=True)
+
+with st.expander("予測値の詳細"):
+    cols=[c for c in [
         "馬番","馬名","騎手","今回想定脚質",
+        "StartDashScore","EarlyTrackingScore","LeadProb_Jockey",
         "PredFirstRank","Pred3Rank","Pred4ScenarioRank",
-        "LeadProb_Jockey","JockeyLift4","FullWinProb",
-        "ScenarioFullWinProb","展開評価"
-    ] if z in pred.columns
-]
-st.dataframe(
-    pred[cols].sort_values("Pred4ScenarioRank"),
-    use_container_width=True,
-    hide_index=True,
-)
+        "FullWinProb","ScenarioFullWinProb","展開評価"
+    ] if c in pred_view.columns]
+    st.dataframe(pred_view[cols].sort_values("Pred4ScenarioRank"),use_container_width=True,hide_index=True)
 
-st.subheader("動き予測")
-st.markdown(render_movement_flow(pred), unsafe_allow_html=True)
-
+st.divider()
 st.subheader("Monte Carlo Simulation")
-c1, c2 = st.columns(2)
-n_sims = c1.selectbox("シミュレーション回数", [1000, 5000, 10000], index=0)
-mc_mode = c2.selectbox(
+st.caption("Monte Carloは自動実行しません。必要な時だけ実行します。")
+mc1,mc2=st.columns(2)
+n_sims=mc1.selectbox("シミュレーション回数",[1000,5000,10000],index=0)
+mc_mode=mc2.selectbox(
     "Monte Carloシナリオ",
-    ["AUTO", "SLOW", "EVEN", "HIGH", "SPRINT_FINISH", "LONG_SPURT"],
+    ["AUTO","SLOW","EVEN","HIGH","SPRINT_FINISH","LONG_SPURT"],
     index=0,
 )
 
-with st.spinner(f"{n_sims:,}回シミュレート中..."):
-    mc, mcmeta = simulate_race(pred, scen, n_sims=n_sims, mode=mc_mode, seed=5601)
+if st.button(f"🎲 {n_sims:,}回シミュレーションを実行",use_container_width=True):
+    with st.spinner(f"{n_sims:,}回シミュレート中..."):
+        mc,meta=simulate_race(pred_view,scen,n_sims=n_sims,mode=mc_mode,seed=5601)
+        st.session_state["_mc_result"]=mc
+        st.session_state["_mc_meta"]=meta
 
-show = mc.copy()
-for z in [
-    "MC勝率","MC連対率","MC複勝率","MC逃げ率",
-    "MC4角3番手内率","MC勝率95%下限","MC勝率95%上限"
-]:
-    if z in show.columns:
-        show[z] = (show[z] * 100).round(1)
-
-st.dataframe(
-    show[[c for c in [
+if "_mc_result" in st.session_state:
+    mc=st.session_state["_mc_result"].copy()
+    meta=st.session_state["_mc_meta"]
+    show=mc.copy()
+    for c in [
+        "MC勝率","MC連対率","MC複勝率","MC逃げ率",
+        "MC4角3番手内率","MC勝率95%下限","MC勝率95%上限"
+    ]:
+        if c in show.columns:
+            show[c]=(show[c]*100).round(1)
+    show_cols=[c for c in [
         "馬番","馬名","今回想定脚質","展開評価",
-        "MC勝率","MC連対率","MC複勝率",
-        "MC4角3番手内率","MC逃げ率",
-        "MC平均着順","MC平均4角順位",
+        "MC勝率","MC連対率","MC複勝率","MC4角3番手内率",
+        "MC逃げ率","MC平均着順","MC平均4角順位",
         "MC勝率95%下限","MC勝率95%上限"
-    ] if c in show.columns]],
-    use_container_width=True,
-    hide_index=True,
-)
-
-st.caption(
-    f"勝率合計={mcmeta['win_rate_sum']*100:.1f}% ｜ "
-    "市場オッズ・Runaway's最終スコアはSimulator入力に使用していません。"
-)
-
-st.subheader("シナリオ別勝率")
-sc_cols = ["馬番","馬名"] + [f"{s}_勝率" for s in ["SLOW","EVEN","HIGH","SPRINT_FINISH","LONG_SPURT"]]
-sc_show = mc[[c for c in sc_cols if c in mc.columns]].copy()
-for z in sc_cols[2:]:
-    if z in sc_show.columns:
-        sc_show[z] = (sc_show[z] * 100).round(1)
-st.dataframe(sc_show, use_container_width=True, hide_index=True)
-
-st.subheader("位置関係の参考")
-top = pred.sort_values("FullWinProb", ascending=False).head(min(4, len(pred)))
-notes = []
-for i in range(len(top)):
-    for j in range(i+1, len(top)):
-        a, b = top.iloc[i], top.iloc[j]
-        notes.append({
-            "組合せ": f"{a['馬名']} × {b['馬名']}",
-            "想定脚質": f"{a['今回想定脚質']} × {b['今回想定脚質']}",
-            "参考": note(a["今回想定脚質"], b["今回想定脚質"], ri["先行圧力"], pairref()),
-        })
-st.dataframe(pd.DataFrame(notes), use_container_width=True, hide_index=True)
+    ] if c in show.columns]
+    st.dataframe(show[show_cols],use_container_width=True,hide_index=True)
+    st.caption(
+        f"勝率合計={meta['win_rate_sum']*100:.1f}% ｜ "
+        "市場オッズ・Runaway's最終スコアはSimulator入力に使用していません。"
+    )

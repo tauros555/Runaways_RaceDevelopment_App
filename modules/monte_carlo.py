@@ -26,7 +26,8 @@ def _scenario_components(df: pd.DataFrame, scenario: str):
     else:
         adj4=np.zeros(len(z)); adjf=np.zeros(len(z))
     four=np.clip(z["FourPred_Jockey"].to_numpy(float)+adj4,0,1)
-    p=np.clip(z["FullWinProb"].to_numpy(float)+adjf,0.001,0.95)
+    base_col="進路補正後勝率ベース" if "進路補正後勝率ベース" in z.columns else "FullWinProb"
+    p=np.clip(z[base_col].to_numpy(float)+adjf,0.001,0.95)
     return four,p
 
 

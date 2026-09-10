@@ -73,3 +73,21 @@ Race Developmentは出馬表列だけをSimulator入力に使用する。
 - Race card browser upload removed; `data/調教判定表.csv` is the only current-race source.
 - Google Drive page can open without loading prediction models.
 - Streamlit deployment model environment pinned; deploy with Python 3.13.
+
+
+## v6.7 UI REWORK
+Race Development本体UIを再設計。
+- strict日付
+- lazy prediction
+- separated Monte Carlo
+- grouped queue
+- テン争い専用表示
+- TARGET更新UIを本体から分離
+
+
+## v6.8 ROUTE BIAS
+- 初角 / 最終コーナーのみの2画面隊列
+- 前後位置 × 内/中/外の2次元表示
+- AUTO/手動の進路バイアス
+- 内外有利をMonte Carloに反映
+- 当日の馬場状態をUIで指定
