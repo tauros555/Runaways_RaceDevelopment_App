@@ -77,7 +77,7 @@ page=st.sidebar.radio(
     ["🎯 レース予測","☁ Google Drive","🧱 データ状態"],
     index=0,
 )
-st.sidebar.caption("v6.8 ROUTE BIAS")
+st.sidebar.caption("v6.8.1 ROUTE BIAS FIX")
 st.sidebar.caption("出馬表：data/調教判定表.csv")
 
 if page=="☁ Google Drive":
@@ -269,7 +269,8 @@ route_cols=[c for c in [
     "馬番","馬名","初角ゾーン","初角進路","最終角ゾーン","最終角進路",
     "進路バイアス評価","進路バイアス補正","展開評価"
 ] if c in pred_view.columns]
-route_show=pred_view[route_cols].sort_values("Pred4ScenarioRank" if "Pred4ScenarioRank" in pred_view.columns else "馬番").copy()
+sort_col="Pred4ScenarioRank" if "Pred4ScenarioRank" in pred_view.columns else "馬番"
+route_show=pred_view.sort_values(sort_col)[route_cols].copy()
 if "進路バイアス補正" in route_show.columns:
     route_show["進路バイアス補正"]=(route_show["進路バイアス補正"]*100).round(1).astype(str)+"pt"
 st.dataframe(route_show,use_container_width=True,hide_index=True)
