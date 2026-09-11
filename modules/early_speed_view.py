@@ -16,14 +16,24 @@ def add_ten_metrics(df: pd.DataFrame) -> pd.DataFrame:
 
     # Race Development display index.
     # This is NOT SmartRC's proprietary "テン" formula.
-    x["テン性能指数"] = (
+    x["RDテン性能指数"] = (
         0.45*x["StartDashScore"]
         + 0.35*x["EarlyTrackingScore"]
         + 0.20*(x["LeadProb_Jockey"].clip(0,1)*100)
     ).clip(0,100)
 
+    if "統合テン指数" in x.columns:
+        x["テン性能指数"] = pd.to_numeric(x["統合テン指数"],errors="coerce").fillna(x["RDテン性能指数"])
+    else:
+        x["テン性能指数"] = x["RDテン性能指数"]
+
     x["ハナ獲得目安"] = (x["LeadProb_Jockey"].clip(0,1)*100)
-    x["テン順位"] = x["テン性能指数"].rank(method="first", ascending=False).astype(int)
+    if "統合テン順位" in x.columns:
+        x["テン順位"] = pd.to_numeric(x["統合テン順位"],errors="coerce").fillna(
+            x["テン性能指数"].rank(method="first", ascending=False)
+        ).astype(int)
+    else:
+        x["テン順位"] = x["テン性能指数"].rank(method="first", ascending=False).astype(int)
     return x
 
 def _esc(v): return html.escape(str(v))
@@ -80,7 +90,7 @@ def render_ten_battle(df: pd.DataFrame, top_n: int = 6) -> str:
         css
         + "<div class='ten-wrap'>"
         + f"<div class='ten-summary'>序盤評価：{summary}</div>"
-        + "<div class='ten-note'>テン性能指数はRace Development独自表示（StartDash 45% + EarlyTracking 35% + LeadProb 20%）。SmartRCの数式を複製したものではありません。</div>"
+        + "<div class='ten-note'>テン性能指数はRDテンを基礎に、SmartRC ten_has取得時はレース内標準化してSmartRC 30% / RD 70%で統合。SmartRC欠損馬はRD 100%へ自動フォールバックします。</div>"
         + "".join(rows)
         + "</div>"
     )

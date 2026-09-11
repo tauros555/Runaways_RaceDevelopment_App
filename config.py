@@ -1,5 +1,5 @@
 APP_NAME="Runaway's Race Development"
-APP_VERSION="6.9.0"
+APP_VERSION="6.10.0"
 HEADER_IMAGE="assets/race_development_header.jpeg"
 
 HISTORY_FILE="data/history_master.csv.gz"
@@ -11,3 +11,6 @@ PAIR_REFERENCE_FILE="data/pair_reference.csv"
 RACECARD_FILE = "data/調教判定表.csv"
 
 DISTANCE_CHANGE_MASTER_FILE="data/DistanceChangeCorrectionMaster_v1.csv"
+
+SMARTRC_FILE="data/smartrc_ten_latest.csv"
+SMARTRC_WEIGHT=0.30

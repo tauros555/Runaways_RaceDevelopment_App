@@ -16,6 +16,7 @@ from modules.movement_visual import add_movement_columns, render_movement_table
 from modules.racecard_local import load_training_judgment_racecard, available_races, select_race
 from modules.attention_flags import add_attention_flags, attention_summary
 from modules.distance_change import effect_label
+from modules.smartrc_integration import load_smartrc, select_race_smartrc, integrate_ten, SMART_RC_FILE
 
 st.set_page_config(
     page_title=config.APP_NAME,
@@ -56,6 +57,13 @@ def _racecard_master_cached(file_version):
 def racecard_master():
     return _racecard_master_cached(_file_version(config.RACECARD_FILE))
 
+@st.cache_data(show_spinner=False)
+def _smartrc_cached(file_version):
+    return load_smartrc(SMART_RC_FILE)
+
+def smartrc_master():
+    return _smartrc_cached(_file_version(SMART_RC_FILE))
+
 def course_row(place, surface, distance):
     c=course()
     surf="芝" if surface=="芝" else "ダート"
@@ -91,12 +99,13 @@ page=st.sidebar.radio(
     ["🎯 レース予測","☁ Google Drive","🧱 データ状態"],
     index=0,
 )
-st.sidebar.caption("v6.9 DISTANCE CHANGE")
+st.sidebar.caption("v6.10 SMART RC TEN")
 st.sidebar.caption("出馬表入力：data/調教判定表.csv")
 st.sidebar.caption("分析履歴：history_seed + history_master更新分")
 if st.sidebar.button("🔄 出馬表を再読込",width="stretch"):
     _racecard_master_cached.clear()
-    for k in ["_pred_result","_scenario","_raceinfo","_active_race_key","_history_meta","_mc_result"]:
+    _smartrc_cached.clear()
+    for k in ["_pred_result","_scenario","_raceinfo","_active_race_key","_history_meta","_mc_result","_smartrc_meta"]:
         st.session_state.pop(k,None)
     st.rerun()
 
@@ -276,6 +285,19 @@ if st.button("▶ Race Development予測を実行",type="primary",width="stretch
         pred,ri=predict(feat)
         pred=assign_grade(pred,thresholds(),year,surface)
         scen,pred=predict_scenario(pred,ri)
+
+        # SmartRCは今回レースの rcode × 馬番だけを自動結合。
+        # ten_hasは小さいほど速いので方向反転後、RDテン70% + SmartRC30%。
+        try:
+            sm_all=smartrc_master()
+            sm_race=select_race_smartrc(sm_all,sel_date,sel_place,sel_r)
+            pred,sm_meta=integrate_ten(pred,sm_race,weight=0.30)
+        except Exception as e:
+            pred,sm_meta=integrate_ten(pred,pd.DataFrame(),weight=0.30)
+            sm_meta["status"]="ERROR"
+            sm_meta["error"]=str(e)
+        st.session_state["_smartrc_meta"]=sm_meta
+
         active=scen["PredictedScenario"]
         pred=scenario_adjustment(pred,active)
         pred=add_movement_columns(pred)
@@ -341,6 +363,32 @@ for c in ["ハナ補正","初角補正","勝率補正"]:
         )
 st.dataframe(dc_show,width="stretch",hide_index=True)
 
+st.subheader("SmartRCテン連携")
+sm_meta=st.session_state.get("_smartrc_meta",{})
+if sm_meta.get("status")=="OK":
+    matched=sm_meta.get("matched",0); total=sm_meta.get("total",len(pred))
+    st.success(
+        f"SmartRC反映 ON ｜ rcode {sm_meta.get('rcode','')} ｜ "
+        f"{matched}/{total}頭 ｜ RD 70% + SmartRC 30%"
+    )
+    if matched < total:
+        st.caption(f"SmartRC欠損 {total-matched}頭はRDテン100%で評価します。")
+elif sm_meta.get("status")=="ERROR":
+    st.warning(f"SmartRC読込エラーのためRDテン100%で継続: {sm_meta.get('error','')}")
+else:
+    st.info("このレースのSmartRCデータなし → RDテン100%で分析します。")
+
+smart_cols=[c for c in [
+    "馬番","馬名","RDテンRaw","SmartRC_ten_has","SmartRC_ten_has_rank",
+    "統合テン指数","統合テン順位","SmartRC反映"
+] if c in pred.columns]
+if smart_cols:
+    smart_show=pred[smart_cols].copy().sort_values("統合テン順位" if "統合テン順位" in smart_cols else "馬番")
+    for c in ["RDテンRaw","統合テン指数"]:
+        if c in smart_show.columns:
+            smart_show[c]=pd.to_numeric(smart_show[c],errors="coerce").round(1)
+    st.dataframe(smart_show,width="stretch",hide_index=True)
+
 st.subheader("テン争い")
 st.markdown(render_ten_battle(pred),unsafe_allow_html=True)
 
@@ -385,7 +433,7 @@ st.dataframe(route_show,width="stretch",hide_index=True)
 with st.expander("予測値の詳細"):
     cols=[c for c in [
         "馬番","馬名","騎手","今回想定脚質",
-        "StartDashScore","EarlyTrackingScore","LeadProb_Base","LeadProb_Jockey",
+        "StartDashScore","EarlyTrackingScore","RDテンRaw","SmartRC_ten_has","統合テン指数","統合テン順位","LeadProb_Base","LeadProb_Jockey",
         "FirstPred_Base","FirstPred_Jockey","PrevDistance","DistanceChange","距離変化区分",
         "PredFirstRank","Pred3Rank","Pred4ScenarioRank",
         "FullWinProb_Base","FullWinProb","ScenarioFullWinProb","展開評価"
