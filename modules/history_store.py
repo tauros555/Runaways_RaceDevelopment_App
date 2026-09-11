@@ -15,6 +15,8 @@ def canonicalize(df):
         x["race_key"]=x["レースID(新)"].astype(str).str.replace(r"\.0$","",regex=True).str[:16]
     if "血統登録番号" not in x.columns: raise ValueError("血統登録番号 が必要です。")
     x["血統登録番号"]=x["血統登録番号"].astype(str).str.replace(r"\.0$","",regex=True)
+    short8=x["血統登録番号"].str.fullmatch(r"\d{8}",na=False)
+    x.loc[short8,"血統登録番号"]="20"+x.loc[short8,"血統登録番号"]
     if "year" not in x.columns and "年" in x.columns:
         y=pd.to_numeric(x["年"],errors="coerce"); x["year"]=np.where(y<100,y+2000,y)
     if "date" not in x.columns and all(c in x.columns for c in ["年","月","日"]):
@@ -59,6 +61,8 @@ def load_history(history_path,seed_path):
     x=x[CANON].copy()
     x["race_key"]=x["race_key"].astype(str).str.replace(r"\.0$","",regex=True)
     x["血統登録番号"]=x["血統登録番号"].astype(str).str.replace(r"\.0$","",regex=True)
+    short8=x["血統登録番号"].str.fullmatch(r"\d{8}",na=False)
+    x.loc[short8,"血統登録番号"]="20"+x.loc[short8,"血統登録番号"]
 
     # Since history_master is concatenated after seed, keep='last' makes updates win.
     x=x.drop_duplicates(["race_key","血統登録番号"],keep="last")

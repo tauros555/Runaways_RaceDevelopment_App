@@ -1,8 +1,13 @@
 import numpy as np
 from modules.model_adapter import predict_queue,predict_fullwin
+from modules.distance_change import apply_queue_corrections,apply_win_correction
 
 def predict(x):
     z=predict_queue(x)
+    # Restore validated course × distance-change correction.
+    # Weights were revalidated on 2026 holdout:
+    # Lead 0.4 / first-position 1.0 / independent win correction 0.3.
+    z=apply_queue_corrections(z)
     lead_density=float(z["LeadProb_Jockey"].mean()); front_density=float((z["FirstPred_Jockey"]>=0.65).mean())
     lci=float(np.clip(0.55*lead_density+0.30*front_density+0.15*float(z["FirstTurnPressure"].iloc[0]),0,1))
     pressure="LOW" if lci<0.55 else ("MID" if lci<0.65 else "HIGH")
@@ -12,6 +17,7 @@ def predict(x):
     z["FrontCloseTension"]=z["FourPred_Jockey"]*z["ClosingOpportunity"]*lci
     z["LeadPressure"]=z["LeadProb_Jockey"]*lci
     z=predict_fullwin(z)
+    z=apply_win_correction(z)
     z["PredFirstRank"]=z["FirstPred_Jockey"].rank(method="first",ascending=False).astype(int)
     z["Pred3Rank"]=z["ThreePred"].rank(method="first",ascending=False).astype(int)
     z["Pred4Rank"]=z["FourPred_Jockey"].rank(method="first",ascending=False).astype(int)
@@ -23,7 +29,7 @@ def predict(x):
         if r["FourPred_Jockey"]>=0.20: return "差し"
         return "追込"
     z["今回想定脚質"]=z.apply(style,axis=1)
-    return z,{"LeadCompetitionIndex_v2":lci,"先行圧力":pressure,"LeadDensity":lead_density,"FrontDensity":front_density,"engine":"FORMAL_MODEL_v2"}
+    return z,{"LeadCompetitionIndex_v2":lci,"先行圧力":pressure,"LeadDensity":lead_density,"FrontDensity":front_density,"engine":"FORMAL_MODEL_v2+DISTANCE_CHANGE_v1"}
 
 def assign_grade(x,t,year,surface):
     x=x.copy(); surf="芝" if surface=="芝" else "ダ"; z=t[t["芝ダ"]==surf].sort_values("適用年")

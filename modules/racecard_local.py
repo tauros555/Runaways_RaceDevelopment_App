@@ -45,11 +45,17 @@ def normalize_training_judgment_table(df: pd.DataFrame) -> pd.DataFrame:
     for c in ["R","馬番","枠","距離"]:
         x[c] = pd.to_numeric(x[c], errors="coerce").astype("Int64")
 
-    x["血統登録番号"] = (
+    # 調教判定表では血統登録番号が8桁短縮形（例: 23106616）で入ることがある。
+    # history_seed / TARGET履歴は10桁形（例: 2023106616）なので、内部キーを10桁へ統一する。
+    reg = (
         pd.to_numeric(x["血統登録番号"], errors="coerce")
         .astype("Int64")
         .astype("string")
     )
+    reg = reg.str.replace(r"\.0$", "", regex=True)
+    short8 = reg.str.fullmatch(r"\d{8}", na=False)
+    reg = reg.where(~short8, "20" + reg)
+    x["血統登録番号"] = reg
 
     x["current_race_key"] = (
         x["年月日"].astype("string")

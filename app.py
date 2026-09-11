@@ -15,6 +15,7 @@ from modules.monte_carlo import simulate_race
 from modules.movement_visual import add_movement_columns, render_movement_table
 from modules.racecard_local import load_training_judgment_racecard, available_races, select_race
 from modules.attention_flags import add_attention_flags, attention_summary
+from modules.distance_change import effect_label
 
 st.set_page_config(
     page_title=config.APP_NAME,
@@ -90,7 +91,7 @@ page=st.sidebar.radio(
     ["🎯 レース予測","☁ Google Drive","🧱 データ状態"],
     index=0,
 )
-st.sidebar.caption("v6.8.4 RACECARD RELOAD FIX")
+st.sidebar.caption("v6.9 DISTANCE CHANGE")
 st.sidebar.caption("出馬表入力：data/調教判定表.csv")
 st.sidebar.caption("分析履歴：history_seed + history_master更新分")
 if st.sidebar.button("🔄 出馬表を再読込",width="stretch"):
@@ -312,6 +313,34 @@ m[1].metric("LeadCompetition",f"{ri['LeadCompetitionIndex_v2']:.3f}")
 m[2].metric("逃げ密度",f"{ri['LeadDensity']:.3f}")
 m[3].metric("先行密度",f"{ri['FrontDensity']:.3f}")
 
+st.subheader("距離変化補正")
+st.caption(
+    "2020-2025で作成し2026で再検証した「場所×芝ダ×今回距離×前走からの距離変化」補正。"
+    "LeadProb=0.4、初角位置=1.0、勝率独立補正=0.3。短縮/延長を一律加点せずコース別に評価します。"
+)
+dc_cols=[c for c in [
+    "馬番","馬名","PrevDistance","距離","DistanceChange","距離変化区分",
+    "距離変化_補正ソース","距離変化_学習N",
+    "距離変化_Lead補正","距離変化_初角補正","距離変化_勝率補正"
+] if c in pred.columns]
+dc_show=pred[dc_cols].copy().sort_values("馬番")
+rename_dc={
+    "PrevDistance":"前走距離",
+    "DistanceChange":"距離差",
+    "距離変化_Lead補正":"ハナ補正",
+    "距離変化_初角補正":"初角補正",
+    "距離変化_勝率補正":"勝率補正",
+    "距離変化_補正ソース":"参照階層",
+    "距離変化_学習N":"学習N",
+}
+dc_show=dc_show.rename(columns=rename_dc)
+for c in ["ハナ補正","初角補正","勝率補正"]:
+    if c in dc_show.columns:
+        dc_show[c]=(pd.to_numeric(dc_show[c],errors="coerce")*100).round(1).map(
+            lambda v: f"{v:+.1f}pt" if pd.notna(v) else "-"
+        )
+st.dataframe(dc_show,width="stretch",hide_index=True)
+
 st.subheader("テン争い")
 st.markdown(render_ten_battle(pred),unsafe_allow_html=True)
 
@@ -356,9 +385,10 @@ st.dataframe(route_show,width="stretch",hide_index=True)
 with st.expander("予測値の詳細"):
     cols=[c for c in [
         "馬番","馬名","騎手","今回想定脚質",
-        "StartDashScore","EarlyTrackingScore","LeadProb_Jockey",
+        "StartDashScore","EarlyTrackingScore","LeadProb_Base","LeadProb_Jockey",
+        "FirstPred_Base","FirstPred_Jockey","PrevDistance","DistanceChange","距離変化区分",
         "PredFirstRank","Pred3Rank","Pred4ScenarioRank",
-        "FullWinProb","ScenarioFullWinProb","展開評価"
+        "FullWinProb_Base","FullWinProb","ScenarioFullWinProb","展開評価"
     ] if c in pred_view.columns]
     st.dataframe(pred_view[cols].sort_values("Pred4ScenarioRank"),width="stretch",hide_index=True)
 
