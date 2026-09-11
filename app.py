@@ -1,3 +1,4 @@
+from pathlib import Path
 import pandas as pd
 import streamlit as st
 import config
@@ -38,9 +39,21 @@ def pairref():
 def history():
     return load_history(config.HISTORY_FILE, config.SEED_HISTORY_FILE)
 
+def _file_version(path):
+    p=Path(path)
+    if not p.exists():
+        return ("missing",0,0)
+    s=p.stat()
+    return (str(p.resolve()), int(s.st_mtime_ns), int(s.st_size))
+
 @st.cache_data(show_spinner=False)
-def racecard_master():
+def _racecard_master_cached(file_version):
+    # file_version is intentionally part of the cache key.
+    # When data/調教判定表.csv changes, Streamlit automatically reloads it.
     return load_training_judgment_racecard(config.RACECARD_FILE)
+
+def racecard_master():
+    return _racecard_master_cached(_file_version(config.RACECARD_FILE))
 
 def course_row(place, surface, distance):
     c=course()
@@ -77,9 +90,15 @@ page=st.sidebar.radio(
     ["🎯 レース予測","☁ Google Drive","🧱 データ状態"],
     index=0,
 )
-st.sidebar.caption("v6.8.3 HISTORY BASE FIX")
+st.sidebar.caption("v6.8.4 RACECARD RELOAD FIX")
 st.sidebar.caption("出馬表入力：data/調教判定表.csv")
 st.sidebar.caption("分析履歴：history_seed + history_master更新分")
+if st.sidebar.button("🔄 出馬表を再読込",width="stretch"):
+    _racecard_master_cached.clear()
+    for k in ["_pred_result","_scenario","_raceinfo","_active_race_key","_history_meta","_mc_result"]:
+        st.session_state.pop(k,None)
+    st.rerun()
+
 
 if page=="☁ Google Drive":
     st.header("Google Drive")
@@ -114,6 +133,17 @@ if page=="🧱 データ状態":
     st.header("データ状態")
 
     st.subheader("① 出馬表入力")
+    try:
+        fp=Path(config.RACECARD_FILE)
+        if fp.exists():
+            stat=fp.stat()
+            st.caption(
+                f"読込ファイル: {config.RACECARD_FILE} ｜ "
+                f"サイズ {stat.st_size:,} bytes ｜ 更新検知キー {stat.st_mtime_ns}"
+            )
+    except Exception:
+        pass
+
     st.caption("調教判定表.csv は『今回走る馬を選ぶための出馬表』です。過去能力・隊列学習の履歴データには使用しません。")
     try:
         rc=racecard_master()
