@@ -1,5 +1,5 @@
 APP_NAME="Runaway's Race Development"
-APP_VERSION="6.10.0"
+APP_VERSION="6.10.1"
 HEADER_IMAGE="assets/race_development_header.jpeg"
 
 HISTORY_FILE="data/history_master.csv.gz"

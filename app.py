@@ -99,7 +99,7 @@ page=st.sidebar.radio(
     ["🎯 レース予測","☁ Google Drive","🧱 データ状態"],
     index=0,
 )
-st.sidebar.caption("v6.10 SMART RC TEN")
+st.sidebar.caption("v6.10.1 MC10000")
 st.sidebar.caption("出馬表入力：data/調教判定表.csv")
 st.sidebar.caption("分析履歴：history_seed + history_master更新分")
 if st.sidebar.button("🔄 出馬表を再読込",width="stretch"):
@@ -442,17 +442,16 @@ with st.expander("予測値の詳細"):
 
 st.divider()
 st.subheader("Monte Carlo Simulation")
-st.caption("Monte Carloは自動実行しません。必要な時だけ実行します。")
-mc1,mc2=st.columns(2)
-n_sims=mc1.selectbox("シミュレーション回数",[1000,5000,10000],index=0)
-mc_mode=mc2.selectbox(
+st.caption("シミュレーション回数は10,000回固定です。必要な時だけ分析ボタンを押してください。")
+mc_mode=st.selectbox(
     "Monte Carloシナリオ",
     ["AUTO","SLOW","EVEN","HIGH","SPRINT_FINISH","LONG_SPURT"],
     index=0,
 )
+n_sims=10000
 
-if st.button(f"🎲 {n_sims:,}回シミュレーションを実行",width="stretch"):
-    with st.spinner(f"{n_sims:,}回シミュレート中..."):
+if st.button("🎲 Monte Carlo分析を実行",width="stretch"):
+    with st.spinner("10,000回シミュレート中..."):
         mc,meta=simulate_race(pred_view,scen,n_sims=n_sims,mode=mc_mode,seed=5601)
         st.session_state["_mc_result"]=mc
         st.session_state["_mc_meta"]=meta
