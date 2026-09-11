@@ -77,7 +77,7 @@ page=st.sidebar.radio(
     ["🎯 レース予測","☁ Google Drive","🧱 データ状態"],
     index=0,
 )
-st.sidebar.caption("v6.8.1 ROUTE BIAS FIX")
+st.sidebar.caption("v6.8.2 RACE SELECTOR")
 st.sidebar.caption("出馬表：data/調教判定表.csv")
 
 if page=="☁ Google Drive":
@@ -139,21 +139,33 @@ if races.empty:
     st.warning("有効なレース日付がありません。YYYYMMDDの8桁日付のみ利用します。")
     st.stop()
 
-# Strict date selector
-date_rows=races[["年月日","日付表示"]].drop_duplicates().sort_values("年月日",ascending=False)
-date_map={r["日付表示"]:int(r["年月日"]) for _,r in date_rows.iterrows()}
-date_label=st.selectbox("日付",list(date_map.keys()))
-sel_date=date_map[date_label]
+# Race selector: 日付・開催場・Rを1つに統合
+race_options=races.copy()
+race_options["R_num"]=pd.to_numeric(race_options["R"],errors="coerce").astype("Int64")
+race_options["距離_num"]=pd.to_numeric(race_options["距離"],errors="coerce").astype("Int64")
+race_options["_label"]=race_options.apply(
+    lambda r:
+        f"{r['日付表示']} ｜ {str(r['場所']).strip()} {int(r['R_num'])}R ｜ "
+        f"{str(r['レース名']).strip()} ｜ {str(r['芝・ダ']).strip()}{int(r['距離_num'])}m",
+    axis=1,
+)
+race_options=race_options.sort_values(
+    ["年月日","場所","R_num"],ascending=[False,True,True]
+).reset_index(drop=True)
 
-r1=races[races["年月日"]==sel_date]
-places=sorted(r1["場所"].dropna().astype(str).unique())
-sel_place=st.selectbox("開催場",places)
+label_to_key=dict(zip(race_options["_label"],race_options["current_race_key"]))
+selected_label=st.selectbox(
+    "分析するレース",
+    race_options["_label"].tolist(),
+    index=0,
+)
+selected_key=label_to_key[selected_label]
+rr=race_options[race_options["current_race_key"]==selected_key].iloc[0]
 
-r2=r1[r1["場所"].astype(str)==sel_place]
-rs=sorted(pd.to_numeric(r2["R"],errors="coerce").dropna().astype(int).unique())
-sel_r=st.selectbox("R",rs)
-
-rr=r2[pd.to_numeric(r2["R"],errors="coerce")==sel_r].iloc[0]
+sel_date=int(rr["年月日"])
+date_label=str(rr["日付表示"])
+sel_place=str(rr["場所"]).strip()
+sel_r=int(rr["R_num"])
 current=select_race(rc,rr["current_race_key"])
 current=add_attention_flags(current)
 
