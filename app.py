@@ -70,15 +70,16 @@ def handle_oauth_callback():
 
 handle_oauth_callback()
 
-st.image(config.HEADER_IMAGE,use_container_width=True)
+st.image(config.HEADER_IMAGE,width="stretch")
 
 page=st.sidebar.radio(
     "Race Development",
     ["🎯 レース予測","☁ Google Drive","🧱 データ状態"],
     index=0,
 )
-st.sidebar.caption("v6.8.2 RACE SELECTOR")
-st.sidebar.caption("出馬表：data/調教判定表.csv")
+st.sidebar.caption("v6.8.3 HISTORY BASE FIX")
+st.sidebar.caption("出馬表入力：data/調教判定表.csv")
+st.sidebar.caption("分析履歴：history_seed + history_master更新分")
 
 if page=="☁ Google Drive":
     st.header("Google Drive")
@@ -111,18 +112,38 @@ if page=="☁ Google Drive":
 
 if page=="🧱 データ状態":
     st.header("データ状態")
+
+    st.subheader("① 出馬表入力")
+    st.caption("調教判定表.csv は『今回走る馬を選ぶための出馬表』です。過去能力・隊列学習の履歴データには使用しません。")
     try:
         rc=racecard_master()
         races=available_races(rc)
         invalid=(~rc["_date_valid"]).sum() if "_date_valid" in rc.columns else 0
         c1,c2,c3=st.columns(3)
         c1.metric("調教判定表 行数",f"{len(rc):,}")
-        c2.metric("有効レース",f"{len(races):,}")
+        c2.metric("選択可能レース",f"{len(races):,}")
         c3.metric("除外した不正日付行",f"{int(invalid):,}")
-        st.dataframe(races.head(50),use_container_width=True,hide_index=True)
+        st.dataframe(races.head(50),width="stretch",hide_index=True)
     except Exception as e:
         st.error(e)
-    st.info("履歴マスタはこのページでは自動読込しません。重い処理はレース予測実行時だけ行います。")
+
+    st.divider()
+    st.subheader("② Race Development分析履歴")
+    st.caption(
+        "分析は history_seed_2020_2026.csv.gz を必ず基礎データとして使用し、"
+        "history_master.csv.gz がある場合はその更新分を上書き結合します。"
+    )
+    if st.button("履歴データ状態を確認",width="stretch"):
+        try:
+            h=history()
+            dates=pd.to_numeric(h["date"],errors="coerce")
+            hc1,hc2,hc3=st.columns(3)
+            hc1.metric("履歴馬走数",f"{len(h):,}")
+            hc2.metric("最古日",str(int(dates.min())) if dates.notna().any() else "-")
+            hc3.metric("最新日",str(int(dates.max())) if dates.notna().any() else "-")
+            st.success("この履歴が予測実行時の過去分析データです。")
+        except Exception as e:
+            st.error(f"履歴読込失敗: {e}")
     st.stop()
 
 # Race prediction page
@@ -175,7 +196,7 @@ year=int(str(sel_date)[:4])
 race_key=str(rr["current_race_key"])
 
 st.caption(
-    f"参照元：data/調教判定表.csv ｜ {date_label} {sel_place} {sel_r}R "
+    f"出馬表：data/調教判定表.csv ｜ {date_label} {sel_place} {sel_r}R "
     f"{rr['レース名']} {surface}{int(dist)}m ｜ {len(current)}頭"
 )
 
@@ -217,9 +238,10 @@ st.divider()
 st.subheader("予測実行")
 st.caption("レース選択だけでは履歴マスタや学習済みモデルを読み込みません。下のボタンを押した時だけ計算します。")
 
-if st.button("▶ Race Development予測を実行",type="primary",use_container_width=True):
+if st.button("▶ Race Development予測を実行",type="primary",width="stretch"):
     with st.spinner("履歴・モデルを読み込み、隊列とシナリオを計算しています..."):
-        feat=build_features(current,history(),course_row(sel_place,surface,dist))
+        hist_df=history()
+        feat=build_features(current,hist_df,course_row(sel_place,surface,dist))
         pred,ri=predict(feat)
         pred=assign_grade(pred,thresholds(),year,surface)
         scen,pred=predict_scenario(pred,ri)
@@ -230,6 +252,12 @@ if st.button("▶ Race Development予測を実行",type="primary",use_container_
         st.session_state["_scenario"]=scen
         st.session_state["_raceinfo"]=ri
         st.session_state["_active_scenario"]=active
+        hdates=pd.to_numeric(hist_df["date"],errors="coerce")
+        st.session_state["_history_meta"]={
+            "rows":len(hist_df),
+            "min_date":int(hdates.min()) if hdates.notna().any() else None,
+            "max_date":int(hdates.max()) if hdates.notna().any() else None,
+        }
         st.session_state.pop("_mc_result",None)
         st.session_state.pop("_mc_meta",None)
 
@@ -239,6 +267,14 @@ if "_pred_result" not in st.session_state:
 pred=st.session_state["_pred_result"].copy()
 scen=st.session_state["_scenario"]
 ri=st.session_state["_raceinfo"]
+
+hm=st.session_state.get("_history_meta",{})
+if hm:
+    st.caption(
+        f"過去分析データ：{hm.get('rows',0):,}馬走 "
+        f"（{hm.get('min_date','-')}〜{hm.get('max_date','-')}）｜ "
+        "調教判定表は今回出走馬の選択・参考表示にのみ使用"
+    )
 
 m=st.columns(4)
 m[0].metric("先行圧力",ri["先行圧力"])
@@ -285,7 +321,7 @@ sort_col="Pred4ScenarioRank" if "Pred4ScenarioRank" in pred_view.columns else "�
 route_show=pred_view.sort_values(sort_col)[route_cols].copy()
 if "進路バイアス補正" in route_show.columns:
     route_show["進路バイアス補正"]=(route_show["進路バイアス補正"]*100).round(1).astype(str)+"pt"
-st.dataframe(route_show,use_container_width=True,hide_index=True)
+st.dataframe(route_show,width="stretch",hide_index=True)
 
 with st.expander("予測値の詳細"):
     cols=[c for c in [
@@ -294,7 +330,7 @@ with st.expander("予測値の詳細"):
         "PredFirstRank","Pred3Rank","Pred4ScenarioRank",
         "FullWinProb","ScenarioFullWinProb","展開評価"
     ] if c in pred_view.columns]
-    st.dataframe(pred_view[cols].sort_values("Pred4ScenarioRank"),use_container_width=True,hide_index=True)
+    st.dataframe(pred_view[cols].sort_values("Pred4ScenarioRank"),width="stretch",hide_index=True)
 
 st.divider()
 st.subheader("Monte Carlo Simulation")
@@ -307,7 +343,7 @@ mc_mode=mc2.selectbox(
     index=0,
 )
 
-if st.button(f"🎲 {n_sims:,}回シミュレーションを実行",use_container_width=True):
+if st.button(f"🎲 {n_sims:,}回シミュレーションを実行",width="stretch"):
     with st.spinner(f"{n_sims:,}回シミュレート中..."):
         mc,meta=simulate_race(pred_view,scen,n_sims=n_sims,mode=mc_mode,seed=5601)
         st.session_state["_mc_result"]=mc
@@ -329,7 +365,7 @@ if "_mc_result" in st.session_state:
         "MC逃げ率","MC平均着順","MC平均4角順位",
         "MC勝率95%下限","MC勝率95%上限"
     ] if c in show.columns]
-    st.dataframe(show[show_cols],use_container_width=True,hide_index=True)
+    st.dataframe(show[show_cols],width="stretch",hide_index=True)
     st.caption(
         f"勝率合計={meta['win_rate_sum']*100:.1f}% ｜ "
         "市場オッズ・Runaway's最終スコアはSimulator入力に使用していません。"

@@ -26,8 +26,44 @@ def canonicalize(df):
         if c not in x.columns: x[c]=np.nan
     return x[CANON].drop_duplicates(["race_key","血統登録番号"],keep="last")
 def load_history(history_path,seed_path):
-    p=Path(history_path); s=Path(seed_path); src=p if p.exists() else s
-    return pd.read_csv(src,encoding="cp932",compression="infer",low_memory=False) if src.exists() else pd.DataFrame(columns=CANON)
+    """
+    Formal Race Development history loading rule.
+
+    - history_seed_2020_2026.csv.gz is ALWAYS the historical base.
+    - history_master.csv.gz, when present, is treated as an update/overlay.
+    - Current racecard (調教判定表.csv) is NEVER used as historical training/history data.
+    - Duplicate race_key × 血統登録番号 rows are resolved in favor of history_master.
+    """
+    p=Path(history_path)
+    s=Path(seed_path)
+
+    frames=[]
+
+    if s.exists():
+        seed=pd.read_csv(s,encoding="cp932",compression="infer",low_memory=False)
+        frames.append(seed)
+
+    if p.exists():
+        master=pd.read_csv(p,encoding="cp932",compression="infer",low_memory=False)
+        frames.append(master)
+
+    if not frames:
+        return pd.DataFrame(columns=CANON)
+
+    x=pd.concat(frames,ignore_index=True,sort=False)
+
+    for c in CANON:
+        if c not in x.columns:
+            x[c]=np.nan
+
+    x=x[CANON].copy()
+    x["race_key"]=x["race_key"].astype(str).str.replace(r"\.0$","",regex=True)
+    x["血統登録番号"]=x["血統登録番号"].astype(str).str.replace(r"\.0$","",regex=True)
+
+    # Since history_master is concatenated after seed, keep='last' makes updates win.
+    x=x.drop_duplicates(["race_key","血統登録番号"],keep="last")
+    x=x.sort_values(["date","場所","レース番号","馬番"],kind="stable").reset_index(drop=True)
+    return x
 def upsert_annual(history,annual_raw):
     a=canonicalize(annual_raw); h=history[CANON].drop_duplicates(["race_key","血統登録番号"],keep="last")
     key=["race_key","血統登録番号"]; hi=h.set_index(key); ai=a.set_index(key)
